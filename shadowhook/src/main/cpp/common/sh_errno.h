@@ -38,6 +38,14 @@
   } while (0)
 
 bool sh_errno_is_invalid(void);
+// Lazily initialize the errno module (TLS key + global flag).
+// Idempotent — safe to call at any time, including from another DSO's
+// constructor .init_array that calls shadowhook_init before sh_errno_ctor
+// (init-order dependency: shadowhook_init checks the errno module; without
+// this, a call from the same DSO's constructor fails with
+// SHADOWHOOK_ERRNO_INIT_ERRNO because the global is still INIT_ERRNO).
+// Returns true when ready; false when pthread_key_create fails.
+bool sh_errno_ensure_init(void);
 void sh_errno_reset(void);
 void sh_errno_set(int error_number);
 int sh_errno_get(void);

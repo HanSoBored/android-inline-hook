@@ -69,7 +69,12 @@ typedef int (*bytesig_sigprocmask_t)(int, const sigset_t *, sigset_t *);
 static void *bytesig_sigaction;    // point to libc's sigaction64() or libc's sigaction()
 static void *bytesig_sigprocmask;  // point to libc's sigprocmask() or libc's sigprocmask64()
 
-__attribute__((constructor)) static void bytesig_ctor(void) {
+// Lazily (and idempotently) initialize: resolve sigaction/sigprocmask from libc.
+// Called from bytesig_ctor AND from shadowhook_init — when shadowhook_init is
+// called from a constructor .init_array of the same DSO (on_load runs before
+// bytesig_ctor), the status is still UNAVAILABLE and bytesig_init would fail.
+void bytesig_ensure_init(void) {
+  if (__predict_false(BYTESIG_STATUS_UNAVAILABLE != bytesig_status)) return;
   void *libc = dlopen("libc.so", RTLD_LOCAL);
   if (__predict_false(NULL == libc)) return;
 
@@ -89,6 +94,10 @@ __attribute__((constructor)) static void bytesig_ctor(void) {
 
 end:
   dlclose(libc);
+}
+
+__attribute__((constructor)) static void bytesig_ctor(void) {
+  bytesig_ensure_init();
 }
 
 #define BYTESIG_PROTECTED_THREADS_MAX 256

@@ -31,10 +31,20 @@
 static int sh_errno_global = SHADOWHOOK_ERRNO_INIT_ERRNO;
 static pthread_key_t sh_errno_tls_key;
 
+bool sh_errno_ensure_init(void) {
+  if (__predict_true(!sh_errno_is_invalid())) return true;
+  // Another DSO's constructor may call shadowhook_init before sh_errno_ctor
+  // (.init_array ordering) — init here instead of failing. shadowhook_init
+  // holds its own init lock, so this is safe without a mutex.
+  pthread_key_t key;
+  if (__predict_false(0 != pthread_key_create(&key, NULL))) return false;
+  sh_errno_tls_key = key;
+  sh_errno_global = SHADOWHOOK_ERRNO_OK;
+  return true;
+}
+
 __attribute__((constructor)) static void sh_errno_ctor(void) {
-  if (__predict_true(0 == pthread_key_create(&sh_errno_tls_key, NULL))) {
-    sh_errno_global = SHADOWHOOK_ERRNO_OK;
-  }
+  sh_errno_ensure_init();
 }
 
 bool sh_errno_is_invalid(void) {

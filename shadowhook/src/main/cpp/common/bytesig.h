@@ -146,6 +146,13 @@ extern "C" {
 
 int bytesig_init(int signum);
 
+// Lazily initialize the bytesig module (resolve sigaction/sigprocmask from libc).
+// Idempotent — safe to call from shadowhook_init before bytesig_init, because
+// when shadowhook_init runs from a constructor .init_array of the same DSO,
+// bytesig_ctor has not run yet (status is still UNAVAILABLE) and bytesig_init
+// would fail.
+void bytesig_ensure_init(void);
+
 void bytesig_protect(pid_t tid, sigjmp_buf *jbuf, const int signums[], size_t signums_cnt);
 void bytesig_unprotect(pid_t tid, const int signums[], size_t signums_cnt);
 

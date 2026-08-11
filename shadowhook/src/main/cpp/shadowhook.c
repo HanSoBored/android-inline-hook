@@ -73,12 +73,19 @@ int shadowhook_init(shadowhook_mode_t default_mode, bool debuggable) {
     pthread_mutex_lock(&lock);
     if (__predict_true(SHADOWHOOK_ERRNO_UNINIT == shadowhook_init_errno)) {
       do_init = true;
-      if (__predict_false(sh_errno_is_invalid())) GOTO_END(SHADOWHOOK_ERRNO_INIT_ERRNO);
+      // The errno module may not be initialized yet when shadowhook_init is
+      // called from a constructor .init_array of the same DSO (on_load runs
+      // before sh_errno_ctor) — lazily init here instead of failing INIT_ERRNO.
+      if (__predict_false(!sh_errno_ensure_init())) GOTO_END(SHADOWHOOK_ERRNO_INIT_ERRNO);
       if (__predict_false(shadowhook_disable)) GOTO_END(SHADOWHOOK_ERRNO_DISABLED);
       if (__predict_false(default_mode < 0 || default_mode > 2)) GOTO_END(SHADOWHOOK_ERRNO_INVALID_ARG);
       shadowhook_default_mode = default_mode;
       sh_log_set_debuggable(debuggable);
       sh_util_init();
+      // bytesig may not be initialized yet when shadowhook_init is called
+      // from a constructor .init_array of the same DSO (see sh_errno_ensure_init)
+      // — lazily init before bytesig_init so it does not fail here.
+      bytesig_ensure_init();
       if (__predict_false(0 != bytesig_init(SIGSEGV))) GOTO_END(SHADOWHOOK_ERRNO_INIT_SIGSEGV);
       if (__predict_false(0 != bytesig_init(SIGBUS))) GOTO_END(SHADOWHOOK_ERRNO_INIT_SIGBUS);
       if (__predict_false(0 != sh_safe_init())) GOTO_END(SHADOWHOOK_ERRNO_INIT_SAFE);
