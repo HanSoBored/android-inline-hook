@@ -15,10 +15,17 @@
 > If you need an Android PLT hook library, try [ByteHook](https://github.com/bytedance/bhook).
 
 
+## Android OS Compatibility
+
+**Android `4.1` - `17 QPR1 Beta 4`**
+
+> We will test and support the latest Android OS Beta versions as promptly as possible, and list the supported Android OS versions here.
+
+
 # Features
 
 - Supports armeabi-v7a and arm64-v8a.
-- Supports Android `4.1` - `16` (API level `16` - `36`).
+- Supports Android `4.1` - `17` (API level `16` - `37`).
 - Supports hook and intercept.
 - Supports specifying hook and intercept target locations via "address" or "library name + function name".
 - Automatically completes hook and intercept for "newly loaded ELFs", with optional callbacks after execution.
@@ -1621,6 +1628,7 @@ const char *shadowhook_to_errmsg(int error_number);
 > - shadowhook records hook/unhook/intercept/unintercept operation information in memory.
 > - Users can call APIs at any time to retrieve these operation records.
 > - You can retrieve these operation records when the app crashes and save them along with the crash information (or deliver them through the network).
+> - You can use `tools/record_parser.py` to parse operation records.
 
 ## Operation Record Format
 
@@ -1639,6 +1647,7 @@ Operation records consist of ASCII visible characters, with each line being one 
 | 9 | ERRNO | Error code |  |
 | 10 | STUB | Stub returned by hook/intercept | "Between hook and unhook" and "between intercept and unintercept" can be paired through this value. |
 | 11 | FLAGS | flags value | This item is not included for operation types unhook and unintercept. |
+| 12 | TRACE | For tracking and debugging | Used to trace the execution flow of instructions after a hook and intercept.<br />Used for debugging hook and intercept operations. |
 
 ## Java API
 
@@ -1660,7 +1669,8 @@ public enum RecordItem {
     BACKUP_LEN,
     ERRNO,
     STUB,
-    FLAGS
+    FLAGS,
+    TRACE
 }
 ```
 
@@ -1673,7 +1683,7 @@ public enum RecordItem {
 #include "shadowhook.h"
 
 // Used to specify which operation record items to retrieve
-#define SHADOWHOOK_RECORD_ITEM_ALL             0x7FF  // 0b11111111111
+#define SHADOWHOOK_RECORD_ITEM_ALL             0xFFFFFFFF
 #define SHADOWHOOK_RECORD_ITEM_TIMESTAMP       (1 << 0)
 #define SHADOWHOOK_RECORD_ITEM_CALLER_LIB_NAME (1 << 1)
 #define SHADOWHOOK_RECORD_ITEM_OP              (1 << 2)
@@ -1685,6 +1695,7 @@ public enum RecordItem {
 #define SHADOWHOOK_RECORD_ITEM_ERRNO           (1 << 8)
 #define SHADOWHOOK_RECORD_ITEM_STUB            (1 << 9)
 #define SHADOWHOOK_RECORD_ITEM_FLAGS           (1 << 10)
+#define SHADOWHOOK_RECORD_ITEM_TRACE           (1 << 11)
 
 char *shadowhook_get_records(uint32_t item_flags);
 void shadowhook_dump_records(int fd, uint32_t item_flags);
@@ -1693,6 +1704,32 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
 - The `item_flags` parameter is used to specify which operation record items to retrieve. You can use `|` to concatenate the flags defined above; you can also specify `SHADOWHOOK_RECORD_ITEM_ALL` to get **all** operation record items.
 - The `shadowhook_get_records()` API returns a buffer allocated with `malloc()` containing the operation records. **Please use `free()` to release after external use.**
 - The `shadowhook_dump_records()` API writes operation records to the file descriptor specified by the `fd` parameter. **This API is async-signal-safe and can be called in signal handlers.**
+
+## Parsing Operation Records
+
+You can use `tools/record_parser.py` to parse operation records.
+
+- Before first use, please install the python3 capstone module: `python3 -m pip install capstone`
+- Adding the `-m` parameter to `record_parser.py` will output the corresponding function/variable/filename in the shadowhook source code, making it easier to read and compare the shadowhook source code. (This is not displayed by default)
+- When running `record_parser.py` with the `-a` flag, you can specify a `maps` file to be used as a reference during parsing. If an operation record shows the "target ELF" as "unknown," the script will attempt to look up the corresponding pathname in the `maps` file using the "target address" and display it.
+
+1. Parsing Multiple Operation Records at Once
+
+First, save multiple "operation records" in a file (e.g., `hook_records.txt`), with each line representing one operation record, and then execute:
+
+```Shell
+./record_parser.py -a ./maps.txt -i ./hook_records.txt
+```
+
+2. Parse one operation record at a time
+
+You can directly enter the operation record in the command line, only one record can be entered at a time:
+
+Note: Please enclose the operation record in double quotes.
+
+```Shell
+./record_parser.py -a ./maps.txt -l "2026-05-29T04:05:14.948+00:00,libunittest.so,intercept_instr_addr,libunittest.so,test_a64_instr_cbz+8,700a4e2b14,700a4a88b8,4,0,b400007075d3deb0,7,B|arm64|hook;T|700a4e2b14|910000b4|99020016;X|70024e3578|0|f0473fa95000005800021fd648c3dfe372000000;N|72e3dfc348;E|72e3ebd940|f0477fa9510000b406000014f0473fa95100005820021fd664354e0270000000f0473fa95000005800025fd650354e0270000000;W|70024e3564|0|f0477fa96ffdff15;e|70024e3550|0|f0477fa971fdff15;R|700a4e2b18;L|72e3dfc348|700000589100005800021fd6ac17460a700000001057d105720000b4;G|700a4617ac;I|700a4a88b8;"
+```
 
 
 # Known Issues
@@ -1716,7 +1753,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
         <td rowspan="5"><code>linker/linker64</code></td>
         <td><code>__linker_init</code></td>
         <td><code>__dl___linker_init</code></td>
-        <td><code>[21,36]</code></td>
+        <td><code>[21,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1741,7 +1778,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>__dl__ZL29__linker_init_post_relocationR19KernelArgumentBlockR6soinfo</code></td>
-        <td><code>[29,36]</code></td>
+        <td><code>[29,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1749,7 +1786,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
         <td rowspan="3"><code>libart.so</code></td>
         <td><code>art::Runtime::Start</code></td>
         <td><code>_ZN3art7Runtime5StartEv</code></td>
-        <td><code>[21,36]</code></td>
+        <td><code>[21,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1762,7 +1799,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>_ZN3art7Runtime4InitEONS_18RuntimeArgumentMapE</code></td>
-        <td><code>[24,36]</code></td>
+        <td><code>[24,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1776,7 +1813,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>_ZN7android14AndroidRuntime5startEPKcRKNS_6VectorINS_7String8EEEb</code></td>
-        <td><code>[23,36]</code></td>
+        <td><code>[23,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1795,7 +1832,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>_ZN7android14AndroidRuntime7startVmEPP7_JavaVMPP7_JNIEnvbb</code></td>
-        <td><code>[30,36]</code></td>
+        <td><code>[30,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>

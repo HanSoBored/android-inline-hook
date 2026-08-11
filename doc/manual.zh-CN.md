@@ -15,10 +15,17 @@
 > 如果你需要的是 Android PLT hook 库，建议试试 [ByteHook](https://github.com/bytedance/bhook)。
 
 
+## Android OS 兼容性
+
+**Android `4.1` - `17 QPR1 Beta 4`**
+
+> 我们会尽可能及时的测试和支持最新的 Android OS Beta 版本，并且在这里说明已经支持的 Android OS 版本范围。
+
+
 # 特征
 
 - 支持 armeabi-v7a 和 arm64-v8a。
-- 支持 Android `4.1` - `16`（API level `16` - `36`）。
+- 支持 Android `4.1` - `17`（API level `16` - `37`）。
 - 支持 hook 和 intercept。
 - 支持通过“地址”或“库名 + 函数名”指定 hook 和 intercept 的目标位置。
 - 自动完成对“新加载 ELF”的 hook 和 intercept，执行完成后调用可选的回调函数。
@@ -1621,6 +1628,7 @@ const char *shadowhook_to_errmsg(int error_number);
 > - shadowhook 会在内存中记录 hook / unhook / intercept / unintercept 的操作信息。
 > - 使用者可以随时调用 API 获取这些操作记录。
 > - 你可以在 app 发生崩溃时，获取这些操作记录，把它们和崩溃信息一起保存下来（或者是通过网络投递出去）。
+> - 可以使用 `tools/record_parser.py` 解析操作记录。
 
 ## 操作记录格式
 
@@ -1639,6 +1647,7 @@ const char *shadowhook_to_errmsg(int error_number);
 | 9 | ERRNO | 错误码 |  |
 | 10 | STUB | hook / intercept 返回的 stub | “hook 和 unhook 之间”以及“intercept 和 unintercept 之间”可以通过这个值来配对。 |
 | 11 | FLAGS | flags值 | 操作类型 unhook 和 unintercept 时不含此项。 |
+| 12 | TRACE | 跟踪调试信息 | 用于跟踪 hook 和 intercept 之后的指令执行流向。<br />用于调试 hook 和 intercept 操作。 |
 
 ## Java API
 
@@ -1660,7 +1669,8 @@ public enum RecordItem {
     BACKUP_LEN,
     ERRNO,
     STUB,
-    FLAGS
+    FLAGS,
+    TRACE
 }
 ```
 
@@ -1673,7 +1683,7 @@ public enum RecordItem {
 #include "shadowhook.h"
 
 // 用于指定需要获取哪些操作记录项
-#define SHADOWHOOK_RECORD_ITEM_ALL             0x7FF  // 0b11111111111
+#define SHADOWHOOK_RECORD_ITEM_ALL             0xFFFFFFFF
 #define SHADOWHOOK_RECORD_ITEM_TIMESTAMP       (1 << 0)
 #define SHADOWHOOK_RECORD_ITEM_CALLER_LIB_NAME (1 << 1)
 #define SHADOWHOOK_RECORD_ITEM_OP              (1 << 2)
@@ -1685,6 +1695,7 @@ public enum RecordItem {
 #define SHADOWHOOK_RECORD_ITEM_ERRNO           (1 << 8)
 #define SHADOWHOOK_RECORD_ITEM_STUB            (1 << 9)
 #define SHADOWHOOK_RECORD_ITEM_FLAGS           (1 << 10)
+#define SHADOWHOOK_RECORD_ITEM_TRACE           (1 << 11)
 
 char *shadowhook_get_records(uint32_t item_flags);
 void shadowhook_dump_records(int fd, uint32_t item_flags);
@@ -1694,6 +1705,31 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
 - `shadowhook_get_records()` API 返回一个用 `malloc()` 分配的 buffer，其中包含了操作记录。**外部使用完后请使用 free()` 释放。**
 - `shadowhook_dump_records()` API 会向 `fd` 参数所指的文件描述符写出操作记录。**这个 API 是异步信号安全的，可以在信号处理函数中调用。**
 
+## 解析操作记录
+
+可以使用 `tools/record_parser.py` 解析操作记录。
+
+- 第一次使用前请先安装 python3 capstone 模块：`python3 -m pip install capstone`
+- `record_parser.py` 加 `-m` 参数，会一起输出该部分对应到 shadowhook 源码中的逻辑的函数/变量/文件名，方便阅读和对照 shadowhook 源码。（默认不显示）
+- `record_parser.py` 加 `-a` 参数，可以指定一个 maps 文件，解析时会参考这个 maps 文件。如果遇到操作记录中“目标 ELF 为 unknown ”的情况，会尝试通过“目标地址”在 maps 文件中查找 pathname 并显示。
+
+1. 一次解析多条操作记录
+
+先把多条“操作记录”保存在一个文件中（比如 `hook_records.txt`），每一行是一条操作记录，然后执行：
+
+```Shell
+./record_parser.py -a ./maps.txt -i ./hook_records.txt
+```
+
+2. 一次解析一条操作记录
+
+可以直接在命令行输入操作记录，每次只能输入一条：
+
+注意：操作记录请放在双引号中。
+
+```Shell
+./record_parser.py -a ./maps.txt -l "2026-05-29T04:05:14.948+00:00,libunittest.so,intercept_instr_addr,libunittest.so,test_a64_instr_cbz+8,700a4e2b14,700a4a88b8,4,0,b400007075d3deb0,7,B|arm64|hook;T|700a4e2b14|910000b4|99020016;X|70024e3578|0|f0473fa95000005800021fd648c3dfe372000000;N|72e3dfc348;E|72e3ebd940|f0477fa9510000b406000014f0473fa95100005820021fd664354e0270000000f0473fa95000005800025fd650354e0270000000;W|70024e3564|0|f0477fa96ffdff15;e|70024e3550|0|f0477fa971fdff15;R|700a4e2b18;L|72e3dfc348|700000589100005800021fd6ac17460a700000001057d105720000b4;G|700a4617ac;I|700a4a88b8;"
+```
 
 # 已知问题
 
@@ -1716,7 +1752,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
         <td rowspan="5"><code>linker/linker64</code></td>
         <td><code>__linker_init</code></td>
         <td><code>__dl___linker_init</code></td>
-        <td><code>[21,36]</code></td>
+        <td><code>[21,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1741,7 +1777,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>__dl__ZL29__linker_init_post_relocationR19KernelArgumentBlockR6soinfo</code></td>
-        <td><code>[29,36]</code></td>
+        <td><code>[29,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1749,7 +1785,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
         <td rowspan="3"><code>libart.so</code></td>
         <td><code>art::Runtime::Start</code></td>
         <td><code>_ZN3art7Runtime5StartEv</code></td>
-        <td><code>[21,36]</code></td>
+        <td><code>[21,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1762,7 +1798,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>_ZN3art7Runtime4InitEONS_18RuntimeArgumentMapE</code></td>
-        <td><code>[24,36]</code></td>
+        <td><code>[24,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1776,7 +1812,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>_ZN7android14AndroidRuntime5startEPKcRKNS_6VectorINS_7String8EEEb</code></td>
-        <td><code>[23,36]</code></td>
+        <td><code>[23,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
@@ -1795,7 +1831,7 @@ void shadowhook_dump_records(int fd, uint32_t item_flags);
     </tr>
     <tr>
         <td><code>_ZN7android14AndroidRuntime7startVmEPP7_JavaVMPP7_JNIEnvbb</code></td>
-        <td><code>[30,36]</code></td>
+        <td><code>[30,37]</code></td>
         <td>✓</td>
         <td>✓</td>
     </tr>
